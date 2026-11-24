@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Skin Detection System</title>
+</head>
+<body>
+  <h2>Skin Detection System</h2>
+  <form method="POST" enctype="multipart/form-data">
+    <input type="file" name="file" accept="image/*" required />
+    <button type="submit">Predict</button>
+  </form>
+  {% if prediction is not none %}
+    <p><strong>Prediction:</strong> {{ prediction }}</p>
+    <p><strong>Confidence:</strong> {{ confidence }}</p>
+  {% endif %}
+</body>
+</html>
