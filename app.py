@@ -4,9 +4,9 @@ import joblib
 import numpy as np
 from PIL import Image
 
-app = flask.Flask(_name_)
+app = flask.Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(_file_))
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -69,5 +69,5 @@ def home():
     )
 
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     app.run(debug=True)
