@@ -3,7 +3,6 @@ import flask
 import joblib
 import numpy as np
 from PIL import Image
-from skimage.feature import graycomatrix, graycoprops
 
 app = flask.Flask(__name__)
 
@@ -13,40 +12,31 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 MODEL_PATH = os.path.join(BASE_DIR, "skin_model.pkl")
-model = joblib.load(MODEL_PATH)
+try:
+    model = joblib.load(MODEL_PATH)
+except Exception as e:
+    model = None
+    print("Model load error:", e)
 
 
 def extract_10_features(image_path):
-    img = Image.open(image_path).convert("L").resize((128, 128))
-    gray_u8 = np.array(img, dtype=np.uint8)
-    # 0..31 level quantization for fast GLCM in serverless
-    quantized = (gray_u8 // 8).astype(np.uint8)
+    img = Image.open(image_path).convert("RGB").resize((64, 64))
+    arr = np.array(img, dtype=np.float32) / 255.0
 
-    glcm = graycomatrix(
-        quantized,
-        distances=[1, 2],
-        angles=[0, np.pi / 4, np.pi / 2, 3 * np.pi / 4],
-        levels=32,
-        symmetric=True,
-        normed=True,
-    )
+    r = arr[:, :, 0]
+    g = arr[:, :, 1]
+    b = arr[:, :, 2]
 
-    contrast = graycoprops(glcm, "contrast").flatten()[:2]
-    dissimilarity = graycoprops(glcm, "dissimilarity").flatten()[:2]
-    homogeneity = graycoprops(glcm, "homogeneity").flatten()[:2]
-    energy = graycoprops(glcm, "energy").flatten()[:2]
-    correlation = graycoprops(glcm, "correlation").flatten()[:2]
-
-    feats = np.concatenate([
-        contrast,
-        dissimilarity,
-        homogeneity,
-        energy,
-        correlation,
-    ]).astype(np.float32)
+    feats = np.array([
+        np.mean(r), np.std(r),
+        np.mean(g), np.std(g),
+        np.mean(b), np.std(b),
+        np.mean(arr), np.std(arr),
+        np.max(arr), np.min(arr),
+    ], dtype=np.float32)
 
     feats = np.nan_to_num(feats, nan=0.0, posinf=1.0, neginf=0.0)
-    expected = getattr(model, "n_features_in_", 10)
+    expected = getattr(model, "n_features_in_", 10) if model is not None else 10
 
     if feats.size < expected:
         feats = np.pad(feats, (0, expected - feats.size))
@@ -65,6 +55,12 @@ def home():
         file = flask.request.files.get("file")
         if not file or file.filename == "":
             prediction = "Please select an image file first."
+            return flask.render_template(
+                "index.html", prediction=prediction, confidence=confidence
+            )
+
+        if model is None:
+            prediction = "Error: Model could not be loaded."
             return flask.render_template(
                 "index.html", prediction=prediction, confidence=confidence
             )
