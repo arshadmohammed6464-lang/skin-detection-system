@@ -3,10 +3,11 @@ import flask
 import joblib
 import numpy as np
 from PIL import Image
+from skimage.feature import graycomatrix, graycoprops
 
 app = flask.Flask(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.abspath(_file_))
 UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -15,23 +16,44 @@ MODEL_PATH = os.path.join(BASE_DIR, "skin_model.pkl")
 model = joblib.load(MODEL_PATH)
 
 
-def prepare_image(image_path, target_size=(64, 64)):
-    img = Image.open(image_path).convert("RGB")
-    img = img.resize(target_size)
-    arr = np.array(img, dtype=np.float32) / 255.0
+def extract_10_features(image_path):
+    img = Image.open(image_path).convert("L").resize((128, 128))
+    gray_u8 = np.array(img, dtype=np.uint8)
+    # 0..31 level quantization for fast GLCM in serverless
+    quantized = (gray_u8 // 8).astype(np.uint8)
 
-    # Agar model 2D input (samples, features) chahta hai
-    if getattr(model, "ndim", None) == 2 or hasattr(model, "n_features_in_"):
-        expected = getattr(model, "n_features_in_", arr.size)
-        flat = arr.flatten()
-        if flat.size != expected:
-            side = int(round((expected / 3) ** 0.5))
-            if side > 0 and side * side * 3 == expected:
-                img = Image.open(image_path).convert("RGB").resize((side, side))
-                flat = (np.array(img, dtype=np.float32) / 255.0).flatten()
-        return flat.reshape(1, -1)
+    glcm = graycomatrix(
+        quantized,
+        distances=[1, 2],
+        angles=[0, np.pi / 4, np.pi / 2, 3 * np.pi / 4],
+        levels=32,
+        symmetric=True,
+        normed=True,
+    )
 
-    return np.expand_dims(arr, axis=0)
+    contrast = graycoprops(glcm, "contrast").flatten()[:2]
+    dissimilarity = graycoprops(glcm, "dissimilarity").flatten()[:2]
+    homogeneity = graycoprops(glcm, "homogeneity").flatten()[:2]
+    energy = graycoprops(glcm, "energy").flatten()[:2]
+    correlation = graycoprops(glcm, "correlation").flatten()[:2]
+
+    feats = np.concatenate([
+        contrast,
+        dissimilarity,
+        homogeneity,
+        energy,
+        correlation,
+    ]).astype(np.float32)
+
+    feats = np.nan_to_num(feats, nan=0.0, posinf=1.0, neginf=0.0)
+    expected = getattr(model, "n_features_in_", 10)
+
+    if feats.size < expected:
+        feats = np.pad(feats, (0, expected - feats.size))
+    elif feats.size > expected:
+        feats = feats[:expected]
+
+    return feats.reshape(1, -1)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -51,7 +73,7 @@ def home():
         file.save(save_path)
 
         try:
-            features = prepare_image(save_path)
+            features = extract_10_features(save_path)
             pred_result = model.predict(features)[0]
             prediction = str(pred_result)
 
